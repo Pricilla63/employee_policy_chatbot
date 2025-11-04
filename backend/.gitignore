@@ -1,0 +1,7 @@
+__pycache__
+vector_store
+.env
+requirements.txt
+testgroq.py
+uploads
+__init__.py

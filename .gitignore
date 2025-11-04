@@ -1,0 +1,9 @@
+
+vector_store
+.env
+requirements.txt
+testgroq.py
+uploads/
+__init__.py
+.venv/
+__pycache__/

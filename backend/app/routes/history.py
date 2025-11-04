@@ -24,6 +24,11 @@ async def get_qa_history(
     history = []
     async for record in cursor:
         record["_id"] = str(record["_id"])
+        
+        # Ensure timestamp field exists, if not set a default
+        if "timestamp" not in record:
+            record["timestamp"] = datetime.now()
+        
         history.append(record)
     
     return history
@@ -82,6 +87,9 @@ async def get_conversation_stats(current_user: dict = Depends(get_current_user))
     recent_activity = []
     async for record in cursor:
         record["_id"] = str(record["_id"])
+        # Ensure timestamp exists
+        if "timestamp" not in record:
+            record["timestamp"] = datetime.now()
         recent_activity.append(record)
     
     return {
@@ -111,6 +119,9 @@ async def search_history(
     results = []
     async for record in cursor:
         record["_id"] = str(record["_id"])
+        # Ensure timestamp exists
+        if "timestamp" not in record:
+            record["timestamp"] = datetime.now()
         results.append(record)
     
     return results

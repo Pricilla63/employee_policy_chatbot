@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from typing import List, Optional
 from datetime import datetime, timedelta
 from bson import ObjectId
-from app.database import get_qa_history_collection, get_documents_collection
+from app.database import get_qa_history_collection, get_documents_from_uploads
 from app.models.conversation import QAHistoryResponse, ConversationStats
 from app.routes.auth import get_current_user
 
@@ -37,7 +37,7 @@ async def get_qa_history(
 async def get_conversation_stats(current_user: dict = Depends(get_current_user)):
     """Get user's conversation statistics"""
     qa_history_collection = get_qa_history_collection()
-    documents_collection = get_documents_collection()
+    documents_collection = get_documents_from_uploads()
     
     # Total questions
     total_questions = await qa_history_collection.count_documents(

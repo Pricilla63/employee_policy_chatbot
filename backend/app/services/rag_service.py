@@ -1,8 +1,11 @@
+# Updated RAGService with version-aware metadata injection into LLM
 import os
 import uuid
 import time
 import httpx
-from typing import List, Dict, Tuple
+import re
+from typing import List, Dict, Tuple, Optional
+from datetime import datetime
 from langchain_community.vectorstores import FAISS
 from langchain.docstore.document import Document
 from app.utils.embeddings import get_embeddings, chunk_text
@@ -13,180 +16,131 @@ settings = get_settings()
 class RAGService:
     def __init__(self):
         self.embeddings = get_embeddings()
-        self.model_name = settings.GROQ_MODEL  # This will now be "llama-3.1-8b-instant"
-        
-        # Only initialize Groq if API key is provided
+        self.model_name = settings.GROQ_MODEL
+
         if settings.GROQ_API_KEY and settings.GROQ_API_KEY.strip():
             try:
                 from groq import Groq
-                
-                # Create httpx client with timeout and proxy support
-                http_client = httpx.Client(
-                    timeout=30.0,
-                    verify=False,  # Disable SSL verification for corporate proxies
-                )
-                
-                self.groq_client = Groq(
-                    api_key=settings.GROQ_API_KEY,
-                    http_client=http_client
-                )
+                http_client = httpx.Client(timeout=30.0, verify=False)
+                self.groq_client = Groq(api_key=settings.GROQ_API_KEY, http_client=http_client)
                 print(f"✅ Groq client initialized with model: {self.model_name}")
             except Exception as e:
                 self.groq_client = None
-                print(f"⚠️  Warning: Failed to initialize Groq client: {e}")
+                print(f"⚠️ Failed to initialize Groq client: {e}")
         else:
             self.groq_client = None
-            print("⚠️  Warning: GROQ_API_KEY not set. Q&A functionality will be limited.")
-        
-    def create_vector_store(self, text: str, document_id: str) -> Tuple[str, int]:
-        """Create FAISS vector store from text chunks"""
+            print("⚠️ GROQ_API_KEY not set. Limited functionality.")
+
+    def create_vector_store(self, text: str, document_name: str) -> Tuple[str, int]:
         chunks = chunk_text(text)
-        
-        if not chunks:
-            raise ValueError("No text chunks created from document")
-        
-        # Create documents
-        documents = [Document(page_content=chunk, metadata={"doc_id": document_id}) 
-                    for chunk in chunks]
-        
-        # Create FAISS index
+        documents = [Document(page_content=chunk, metadata={"document_name": document_name, "chunk_id": i, "chunk_count": len(chunks)}) for i, chunk in enumerate(chunks)]
         vector_store = FAISS.from_documents(documents, self.embeddings)
-        
-        # Save vector store
         vector_store_id = str(uuid.uuid4())
         store_path = os.path.join(settings.VECTOR_STORE_PATH, vector_store_id)
         os.makedirs(settings.VECTOR_STORE_PATH, exist_ok=True)
         vector_store.save_local(store_path)
-        
         return vector_store_id, len(chunks)
-    
-    def load_vector_store(self, vector_store_id: str) -> FAISS:
-        """Load FAISS vector store - compatible with multiple versions"""
-        store_path = os.path.join(settings.VECTOR_STORE_PATH, vector_store_id)
-        
-        # Try with newer API first
-        try:
-            return FAISS.load_local(
-                store_path, 
-                self.embeddings, 
-                allow_dangerous_deserialization=True
-            )
-        except TypeError:
-            # Fall back to older API
-            return FAISS.load_local(store_path, self.embeddings)
-    
-    def retrieve_context(self, vector_store_id: str, query: str, k: int = 4) -> List[str]:
-        """Retrieve relevant chunks from vector store"""
-        try:
-            vector_store = self.load_vector_store(vector_store_id)
-            docs = vector_store.similarity_search(query, k=k)
-            return [doc.page_content for doc in docs]
-        except Exception as e:
-            print(f"Error in retrieve_context for {vector_store_id}: {e}")
-            return []
-    
-    def generate_answer(self, query: str, context: List[str]) -> Dict:
-        """Generate answer using Groq AI with retry logic"""
-        if not self.groq_client:
-            return {
-                "answer": self._fallback_answer(query, context),
-                "response_time": 0,
-                "tokens_used": 0,
-                "model_used": "fallback"
-            }
-        
-        start_time = time.time()
-        context_text = "\n\n".join(context)
-        
-        prompt = f"""You are a helpful HR assistant for LoanDNA. Answer the employee's question based on the company policy documents.
 
-Context from company documents:
+    def load_vector_store(self, vector_store_id: str) -> FAISS:
+        store_path = os.path.join(settings.VECTOR_STORE_PATH, vector_store_id)
+        try:
+            return FAISS.load_local(store_path, self.embeddings, allow_dangerous_deserialization=True)
+        except Exception:
+            return FAISS.load_local(store_path, self.embeddings)
+
+    def search_related_content(self, vector_store_id: str, query: str, k: int = 5) -> List[Dict]:
+        vector_store = self.load_vector_store(vector_store_id)
+        docs_with_scores = vector_store.similarity_search_with_score(query, k=k*2)
+        relevant = []
+        for doc, score in docs_with_scores:
+            relevant.append({"content": doc.page_content, "score": score, "metadata": doc.metadata})
+        relevant.sort(key=lambda x: x["score"])
+        return relevant[:k]
+
+    def extract_dates(self, text: str) -> List[str]:
+        patterns = [
+            r"\b(?:\d{1,2}[/-]){2}\d{2,4}\b",
+            r"\b\d{4}[/-]\d{1,2}[/-]\d{1,2}\b",
+            r"\b\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{2,4}\b",
+        ]
+        found = []
+        for p in patterns:
+            found += re.findall(p, text, flags=re.IGNORECASE)
+        seen = set(); out=[]
+        for d in found:
+            if d not in seen:
+                seen.add(d); out.append(d)
+        return out[:10]
+
+    def query_documents_with_versions(self, query: str, documents: List[Dict], document_service) -> Dict:
+        start = time.time()
+        relevant_chunks = []
+        for doc in documents:
+            vs_id = doc.get("vector_store_id")
+            if not vs_id:
+                continue
+            chunks = self.search_related_content(vs_id, query, k=4)
+            for c in chunks:
+                c.update({
+                    "filename": doc["filename"],
+                    "version": doc.get("version", 1),
+                    "file_modified_at": doc.get("file_modified_at"),
+                })
+                relevant_chunks.append(c)
+
+        relevant_chunks.sort(key=lambda x: (x["score"], x.get("file_modified_at", "")), reverse=False)
+
+        context_text = ""
+        all_dates = []
+        for c in relevant_chunks[:6]:
+            text = c["content"]
+            dates = self.extract_dates(text)
+            all_dates.extend(dates)
+            context_text += f"""
+[Document: {c['filename']}, Version: {c['version']}, Modified: {c.get('file_modified_at')}, Score: {c['score']:.4f}]
+{text}
+"""
+
+        all_dates = list(dict.fromkeys(all_dates))
+        detected_dates = ", ".join(all_dates) if all_dates else "None detected"
+
+        prompt = f"""
+You are a strict policy assistant. Use ONLY the context below.
+Always choose information from the latest Modified version.
+If older text conflicts with newer text, ignore older text.
+If unsure, say you cannot confirm from policy.
+
+Detected Dates: {detected_dates}
+
+CONTEXT:
 {context_text}
 
 Question: {query}
+Answer in bullet points with the version and date reference.
+"""
 
-Instructions: 
-- Provide a clear, professional answer based on the context
-- If the answer is not in the context, say "I don't have information about this in the available policy documents. Please contact HR at hr@loandna.com"
-- Be concise but complete
-- Format your response in a professional manner
-
-Answer:"""
-        
-        # Retry logic for connection errors
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                chat_completion = self.groq_client.chat.completions.create(
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": "You are a helpful HR assistant for LoanDNA that answers employee questions based on company policy documents. Be professional, accurate, and helpful."
-                        },
-                        {
-                            "role": "user",
-                            "content": prompt
-                        }
-                    ],
-                    model=self.model_name,  # Now uses "llama-3.1-8b-instant"
-                    temperature=0.3,
-                    max_tokens=1024,
-                )
-                
-                end_time = time.time()
-                response_time = end_time - start_time
-                
-                return {
-                    "answer": chat_completion.choices[0].message.content,
-                    "response_time": response_time,
-                    "tokens_used": chat_completion.usage.total_tokens if hasattr(chat_completion, 'usage') else None,
-                    "model_used": self.model_name
-                }
-                
-            except Exception as e:
-                print(f"Groq API attempt {attempt + 1} failed: {e}")
-                if attempt < max_retries - 1:
-                    time.sleep(1)  # Wait before retry
-                else:
-                    # All retries failed, return fallback
-                    return {
-                        "answer": self._fallback_answer(query, context),
-                        "response_time": 0,
-                        "tokens_used": 0,
-                        "model_used": "fallback"
-                    }
-    
-    def _fallback_answer(self, query: str, context: List[str]) -> str:
-        """Fallback answer when Groq API is unavailable"""
-        context_text = "\n\n---\n\n".join(context[:3])
-        
-        return f"""⚠️ AI service temporarily unavailable. Here are the relevant sections from the policy documents:
-
-{context_text}
-
-📧 For detailed clarification, please contact HR at hr@loandna.com"""
-    
-    def query_documents(self, vector_store_ids: List[str], query: str) -> dict:
-        """Query multiple documents and generate answer"""
-        all_contexts = []
-        
-        for vs_id in vector_store_ids:
-            try:
-                contexts = self.retrieve_context(vs_id, query, k=3)
-                all_contexts.extend(contexts)
-            except Exception as e:
-                print(f"Error retrieving from {vs_id}: {e}")
-        
-        if not all_contexts:
+        if not self.groq_client:
+            end = time.time()
             return {
-                "answer": "❌ No relevant information found in the policy documents.\n\n📧 Please contact HR at hr@loandna.com for assistance.",
-                "sources": [],
-                "response_time": 0,
-                "tokens_used": 0,
-                "model_used": "none"
+                "answer": "Model unavailable",
+                "sources": list({c['filename'] for c in relevant_chunks}),
+                "dates_found": all_dates,
+                "response_time": round(end - start, 3),
+                "model_used": None
             }
-        
-        result = self.generate_answer(query, all_contexts)
-        result["sources"] = all_contexts[:3]
-        
-        return result
+
+        chat = self.groq_client.chat.completions.create(
+            model=self.model_name,
+            messages=[{"role": "system", "content": "You answer only using context"},{"role": "user", "content": prompt}],
+            temperature=0.2
+        )
+
+        end = time.time()
+        answer = chat.choices[0].message.content
+        return {
+            "answer": answer,
+            "sources": list({c['filename'] for c in relevant_chunks}),
+            "dates_found": all_dates,
+            "response_time": round(end - start, 3),
+            "model_used": self.model_name
+        }

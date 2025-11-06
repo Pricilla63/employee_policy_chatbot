@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
 from bson import ObjectId
-from app.database import get_conversations_collection, get_qa_history_collection, get_documents_collection
+from app.database import get_conversations_collection, get_qa_history_collection, get_documents_from_uploads
 from app.models.conversation import ConversationResponse, ConversationStats
 from app.services.conversation_service import ConversationService
 from app.routes.auth import get_current_user
@@ -62,7 +62,7 @@ async def get_conversation_stats(current_user: dict = Depends(get_current_user))
     """Get conversation statistics"""
     # Get collections INSIDE the async function
     qa_history_collection = get_qa_history_collection()
-    documents_collection = get_documents_collection()
+    documents_collection = get_documents_from_uploads()
     
     # Get conversation stats
     conv_stats = await conversation_service.get_conversation_stats(current_user["_id"])

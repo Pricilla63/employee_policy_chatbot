@@ -32,7 +32,7 @@ const Login = () => {
       <div className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-md">
         <div className="flex items-center justify-center mb-8">
           <MessageSquare className="w-12 h-12 text-blue-600 mr-3" />
-          <h1 className="text-3xl font-bold text-gray-800">DocuChat AI</h1>
+          <h1 className="text-3xl font-bold text-gray-800">LoanDNA AI</h1>
         </div>
 
         <h2 className="text-2xl font-semibold text-gray-700 mb-6 text-center">

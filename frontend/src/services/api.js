@@ -55,12 +55,27 @@ export const queryAPI = {
 
 // History API
 export const historyAPI = {
-  getHistory: (limit = 50, skip = 0) =>
+  getHistory: (limit = 100, skip = 0) =>
     api.get(`/history/?limit=${limit}&skip=${skip}`),
   getStats: () => api.get('/history/stats'),
   search: (query) => api.get(`/history/search?q=${query}`),
   deleteItem: (id) => api.delete(`/history/${id}`),
   clearAll: () => api.delete('/history/'),
 };
+
+
+export const conversationsAPI = {
+  getConversations: (limit = 50, skip = 0) =>
+    api.get(`/conversations?limit=${limit}&skip=${skip}`),
+  getActiveConversation: () => api.get('/conversations/active'),
+  getConversation: (id) => api.get(`/conversations/${id}`),
+  startNewConversation: () => api.post('/conversations/new'),
+  deleteConversation: (id) => api.delete(`/conversations/${id}`),
+  getStats: () => api.get('/conversations/stats/overview'),
+};
+
+
+
+
 
 export default api;

@@ -3,6 +3,7 @@ import { useAuth } from '../../context/authcontext';
 import { conversationsAPI } from '../../services/api'; // Changed from historyAPI to conversationsAPI
 import { MessageSquare, Plus, LogOut, Trash2 } from 'lucide-react';
 
+
 const Sidebar = ({ onNewChat, onSelectHistory, selectedHistory, refreshTrigger }) => {
   const { user, logout } = useAuth();
   const [history, setHistory] = useState([]);

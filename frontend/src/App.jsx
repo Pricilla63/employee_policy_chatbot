@@ -197,6 +197,7 @@ import ChatArea from './components/layout/chatarea';
 import Loader from './components/common/loader';
 import ErrorBoundary from './components/common/errorboundary';
 
+
 const PrivateRoute = ({ children }) => {
   const { user, loading } = useAuth();
 

@@ -3,6 +3,7 @@ import { useAuth } from '../../context/authcontext';
 import { queryAPI, conversationsAPI } from '../../services/api';
 import { Send, Loader2, Sparkles, Copy, Check } from 'lucide-react';
 
+
 const ChatArea = ({ selectedHistory, onNewMessage, onMessagesUpdate, currentMessages, currentConversationId, onConversationIdChange }) => {
   const { user } = useAuth();
   const [messages, setMessages] = useState([]);
